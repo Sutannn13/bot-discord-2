@@ -36,6 +36,16 @@ Rumus: total XP buat level `n` = `100 × n`. Di level **100** progress bar tampi
 
 > Rate XP (per chat/voice) masih bisa diubah admin pakai `/set-xp`.
 
+### ⚠️ Sistem SP (Surat Peringatan)
+
+Kalau member pakai **kata kasar**, bot otomatis:
+1. Hapus pesan + kasih SP.
+2. **SP 1/3**: Warning.
+3. **SP 2/3**: Auto **timeout 1 jam**.
+4. **SP 3/3**: Auto **kick** dari server.
+
+> Owner, admin (Manage Server), dan moderator (Moderate Members) **kebal** dari filter kata kasar.
+
 ---
 
 ## 3. Daftar Slash Command
@@ -64,8 +74,13 @@ Rumus: total XP buat level `n` = `100 × n`. Di level **100** progress bar tampi
 |---|---|---|
 | `/warn <user> <alasan>` | Moderate Members | Catat peringatan, DM ke user, log ke `#guardian-log` |
 | `/warnings <user>` | Moderate Members | Lihat riwayat peringatan |
+| `/unwarn <user>` | Moderate Members | Hapus warning terakhir + log |
+| `/clearwarn <user>` | Moderate Members | Hapus **semua** warning + reset SP |
+| `/timeout <user> <menit> [alasan]` | Moderate Members | Timeout member (1 – 40320 menit) + log |
 | `/kick <user> [alasan]` | Kick Members | Keluarkan member + log |
 | `/ban <user> [alasan]` | Ban Members | Ban member + log |
+
+> **Catatan keamanan:** Moderator tidak bisa warn/kick/ban member dengan role yang sama atau lebih tinggi.
 
 ---
 

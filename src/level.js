@@ -6,10 +6,9 @@ function xpForLevel(level) { return 100 * level; }
 // ───────────────────────────────────────────────────────────────────────────
 
 // Total XP -> level saat ini (di-cap MAX_LEVEL)
+// O(1) untuk kurva flat — kalau kurva diubah jadi non-linear, ganti pakai binary search.
 function levelForXp(totalXp) {
-  let level = 0;
-  while (level < MAX_LEVEL && totalXp >= xpForLevel(level + 1)) level++;
-  return level;
+  return Math.min(MAX_LEVEL, Math.floor(totalXp / 100));
 }
 
 // Progress di dalam level saat ini (buat progress bar di /rank)

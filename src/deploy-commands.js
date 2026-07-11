@@ -46,6 +46,14 @@ const commands = [
   new SlashCommandBuilder().setName('ban').setDescription('Ban member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
     .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true))
     .addStringOption((o) => o.setName('reason').setDescription('Alasan').setRequired(false)),
+  new SlashCommandBuilder().setName('timeout').setDescription('Timeout member (ga bisa chat/react)').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true))
+    .addIntegerOption((o) => o.setName('duration').setDescription('Durasi (menit)').setRequired(true).setMinValue(1).setMaxValue(40320))
+    .addStringOption((o) => o.setName('reason').setDescription('Alasan').setRequired(false)),
+  new SlashCommandBuilder().setName('unwarn').setDescription('Hapus warning terakhir member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true)),
+  new SlashCommandBuilder().setName('clearwarn').setDescription('Hapus semua warning + reset SP member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true)),
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events } = require('discord.js');
+const { Client, GatewayIntentBits, Events, PermissionFlagsBits } = require('discord.js');
 const cron = require('node-cron');
 const { supabase, getConfig } = require('./db');
 const { levelForXp } = require('./level');
@@ -92,7 +92,12 @@ client.on(Events.MessageCreate, async (msg) => {
     if (msg.author.bot || !msg.guild) return;
     
     // --- Cek Kata Kasar ---
-    if (BAD_WORDS_REGEX.test(msg.content) && msg.author.id !== msg.guild.ownerId) {
+    const member = msg.member;
+    const isStaff = msg.author.id === msg.guild.ownerId
+      || member?.permissions.has(PermissionFlagsBits.ManageGuild)
+      || member?.permissions.has(PermissionFlagsBits.ModerateMembers);
+
+    if (BAD_WORDS_REGEX.test(msg.content) && !isStaff) {
       await msg.delete().catch(() => {});
       
       const { data: u } = await supabase.from('users')
@@ -103,12 +108,19 @@ client.on(Events.MessageCreate, async (msg) => {
       let penaltyPoints = (u?.penalty_points || 0) + 1;
       if (spCount < 3) spCount += 1;
       
-      await supabase.from('users').upsert({
-        guild_id: msg.guild.id,
-        user_id: msg.author.id,
-        sp_count: spCount,
-        penalty_points: penaltyPoints
-      }, { onConflict: 'guild_id,user_id' });
+      // Aman: hanya update kolom SP, tidak overwrite XP
+      if (u) {
+        await supabase.from('users')
+          .update({ sp_count: spCount, penalty_points: penaltyPoints })
+          .eq('guild_id', msg.guild.id).eq('user_id', msg.author.id);
+      } else {
+        await supabase.from('users').insert({
+          guild_id: msg.guild.id,
+          user_id: msg.author.id,
+          sp_count: spCount,
+          penalty_points: penaltyPoints
+        });
+      }
       
       await supabase.from('warnings').insert({
         guild_id: msg.guild.id,
@@ -117,7 +129,22 @@ client.on(Events.MessageCreate, async (msg) => {
         reason: 'Auto SP: Terdeteksi menggunakan kata kasar'
       });
       
-      msg.channel.send(`<@${msg.author.id}>, pesan Anda dihapus karena mengandung kata kasar! Anda sekarang memiliki **SP ${spCount}/3** dan **${penaltyPoints} Poin Penalti**.`)
+      // SP Escalation
+      let escalationMsg = '';
+      const guildMember = await msg.guild.members.fetch(msg.author.id).catch(() => null);
+      if (spCount === 2 && guildMember) {
+        // SP 2/3: Auto timeout 1 jam
+        await guildMember.timeout(60 * 60 * 1000, 'Auto: SP 2/3 — kata kasar berulang').catch(() => {});
+        escalationMsg = '\n🔇 **Kamu di-timeout 1 jam** karena pelanggaran berulang.';
+      } else if (spCount >= 3 && guildMember) {
+        // SP 3/3: Auto kick
+        if (guildMember.kickable) {
+          await guildMember.kick('Auto: SP 3/3 — kata kasar berulang').catch(() => {});
+          escalationMsg = '\n👢 **Kamu di-kick** karena sudah 3x pelanggaran.';
+        }
+      }
+      
+      msg.channel.send(`<@${msg.author.id}>, pesan Anda dihapus karena mengandung kata kasar! Anda sekarang memiliki **SP ${spCount}/3** dan **${penaltyPoints} Poin Penalti**.${escalationMsg}`)
         .then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
         
       return; // Stop disini
@@ -195,5 +222,19 @@ cron.schedule('0 0 * * 1', async () => {
   console.log('🔁 Weekly XP di-reset.');
 }, { timezone: 'Asia/Jakarta' });
 
-client.once(Events.ClientReady, (c) => console.log(`✅ Login sebagai ${c.user.tag}`));
+client.once(Events.ClientReady, async (c) => {
+  // Recover voice sessions: scan semua voice channel dan inisialisasi session
+  for (const [, guild] of c.guilds.cache) {
+    for (const [, channel] of guild.channels.cache) {
+      if (channel.isVoiceBased?.()) {
+        for (const [memberId, member] of channel.members) {
+          if (!member.user.bot) {
+            voiceSessions.set(`${guild.id}:${memberId}`, { since: Date.now() });
+          }
+        }
+      }
+    }
+  }
+  console.log(`✅ Login sebagai ${c.user.tag} — ${voiceSessions.size} voice session recovered`);
+});
 client.login(process.env.DISCORD_TOKEN);
