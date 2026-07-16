@@ -83,52 +83,94 @@ async function handleLevelUp(guild, userId, oldLevel, newLevel, channel) {
   ch?.send?.(`🎉 <@${userId}> naik ke **level ${newLevel}**!`).catch(() => {});
 }
 
-// Daftar kata kasar sederhana
-const BAD_WORDS_REGEX = /\b(anjing|bangsat|babi|kontol|memek|ngentot|tolol|goblok|bajingan)\b/i;
+// Daftar kata kasar default (fallback kalau guild belum set sendiri lewat /set-badwords).
+const DEFAULT_BAD_WORDS = ['anjing', 'bangsat', 'babi', 'kontol', 'memek', 'ngentot', 'tolol', 'goblok', 'bajingan'];
+
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Normalisasi agresif buat lawan bypass: lowercase, leetspeak umum, buang SEMUA
+// non-huruf (jadi "a.n.j.i.n.g" / "a n j i n g" ke-collapse), lalu kecilin huruf berulang.
+function normalizeAggressive(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/[4@]/g, 'a')
+    .replace(/[3€]/g, 'e')
+    .replace(/[1!|]/g, 'i')
+    .replace(/0/g, 'o')
+    .replace(/\$/g, 's')
+    .replace(/[^a-z]/g, '')        // buang spasi/simbol penyisip
+    .replace(/(.)\1{2,}/g, '$1');  // "anjjjing" -> "anjing" (3+ huruf sama jadi 1)
+}
+
+// Dua lapis: (1) word-boundary di teks asli — presisi, low false-positive.
+// (2) normalisasi agresif + substring — nangkep sisipan simbol/spasi/leet.
+function containsBadWord(content, words) {
+  if (!content || !words.length) return false;
+  const boundary = new RegExp(`\\b(${words.map(escapeRegex).join('|')})\\b`, 'i');
+  if (boundary.test(content)) return true;
+  const norm = normalizeAggressive(content);
+  return words.some((w) => {
+    const nw = normalizeAggressive(w);
+    return nw && norm.includes(nw);
+  });
+}
 
 // ---- XP dari chat ----
 client.on(Events.MessageCreate, async (msg) => {
   try {
     if (msg.author.bot || !msg.guild) return;
     
+    const cfg = await getConfig(msg.guild.id);
+
     // --- Cek Kata Kasar ---
     const member = msg.member;
     const isStaff = msg.author.id === msg.guild.ownerId
       || member?.permissions.has(PermissionFlagsBits.ManageGuild)
       || member?.permissions.has(PermissionFlagsBits.ModerateMembers);
 
-    if (BAD_WORDS_REGEX.test(msg.content) && !isStaff) {
+    // Pakai daftar per-guild kalau ada (dari /set-badwords), fallback ke default bawaan.
+    const badWords = (Array.isArray(cfg?.bad_words) && cfg.bad_words.length)
+      ? cfg.bad_words
+      : DEFAULT_BAD_WORDS;
+
+    if (!isStaff && containsBadWord(msg.content, badWords)) {
       await msg.delete().catch(() => {});
-      
-      const { data: u } = await supabase.from('users')
-        .select('sp_count, penalty_points')
-        .eq('guild_id', msg.guild.id).eq('user_id', msg.author.id).maybeSingle();
-      
-      let spCount = u?.sp_count || 0;
-      let penaltyPoints = (u?.penalty_points || 0) + 1;
-      if (spCount < 3) spCount += 1;
-      
-      // Aman: hanya update kolom SP, tidak overwrite XP
-      if (u) {
-        await supabase.from('users')
-          .update({ sp_count: spCount, penalty_points: penaltyPoints })
-          .eq('guild_id', msg.guild.id).eq('user_id', msg.author.id);
-      } else {
-        await supabase.from('users').insert({
-          guild_id: msg.guild.id,
-          user_id: msg.author.id,
-          sp_count: spCount,
-          penalty_points: penaltyPoints
-        });
-      }
-      
+
+      // Serialize sama seperti addXp: read-modify-write sp_count/penalty ga saling timpa
+      // kalau user spam kata kasar barengan atau berbarengan dapat XP.
+      const spKey = `${msg.guild.id}:${msg.author.id}`;
+      const { spCount, penaltyPoints } = await withUserLock(spKey, async () => {
+        const { data: u } = await supabase.from('users')
+          .select('sp_count, penalty_points')
+          .eq('guild_id', msg.guild.id).eq('user_id', msg.author.id).maybeSingle();
+
+        let sp = u?.sp_count || 0;
+        const penalty = (u?.penalty_points || 0) + 1;
+        if (sp < 3) sp += 1;
+
+        // Aman: hanya update kolom SP, tidak overwrite XP
+        if (u) {
+          await supabase.from('users')
+            .update({ sp_count: sp, penalty_points: penalty })
+            .eq('guild_id', msg.guild.id).eq('user_id', msg.author.id);
+        } else {
+          await supabase.from('users').insert({
+            guild_id: msg.guild.id,
+            user_id: msg.author.id,
+            sp_count: sp,
+            penalty_points: penalty,
+          });
+        }
+        return { spCount: sp, penaltyPoints: penalty };
+      });
+
       await supabase.from('warnings').insert({
         guild_id: msg.guild.id,
         user_id: msg.author.id,
         moderator_id: client.user.id,
         reason: 'Auto SP: Terdeteksi menggunakan kata kasar'
       });
-      
+
       // SP Escalation
       let escalationMsg = '';
       const guildMember = await msg.guild.members.fetch(msg.author.id).catch(() => null);
@@ -143,15 +185,14 @@ client.on(Events.MessageCreate, async (msg) => {
           escalationMsg = '\n👢 **Kamu di-kick** karena sudah 3x pelanggaran.';
         }
       }
-      
+
       msg.channel.send(`<@${msg.author.id}>, pesan Anda dihapus karena mengandung kata kasar! Anda sekarang memiliki **SP ${spCount}/3** dan **${penaltyPoints} Poin Penalti**.${escalationMsg}`)
         .then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
-        
+
       return; // Stop disini
     }
     // --- Akhir Cek Kata Kasar ---
 
-    const cfg = await getConfig(msg.guild.id);
     const xp = { ...DEFAULTS, ...(cfg?.xp_settings || {}) };
     if ((xp.noXpChannels || []).includes(msg.channelId)) return;
 

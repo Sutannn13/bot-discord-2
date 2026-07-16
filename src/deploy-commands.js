@@ -33,6 +33,10 @@ const commands = [
     .addStringOption((o) => o.setName('action').setDescription('add / remove').setRequired(true)
       .addChoices({ name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }))
     .addChannelOption(textChannel),
+  new SlashCommandBuilder().setName('set-badwords').setDescription('Atur filter kata kasar per-server').setDefaultMemberPermissions(ADMIN)
+    .addStringOption((o) => o.setName('action').setDescription('add / remove / list').setRequired(true)
+      .addChoices({ name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }, { name: 'list', value: 'list' }))
+    .addStringOption((o) => o.setName('word').setDescription('Kata (wajib buat add/remove)').setRequired(false)),
 
   // ----- Moderation -----
   new SlashCommandBuilder().setName('warn').setDescription('Beri peringatan ke member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)

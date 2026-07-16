@@ -32,6 +32,9 @@ create table if not exists guild_config (
 alter table guild_config add column if not exists mod_log_channel_id text;   -- #guardian-log
 alter table guild_config add column if not exists report_channel_id  text;   -- #report-user
 
+-- Filter kata kasar per-guild (diatur lewat /set-badwords). Kosong = pakai default bawaan bot.
+alter table guild_config add column if not exists bad_words jsonb not null default '[]'::jsonb;
+
 -- Tabel riwayat peringatan (/warn)
 create table if not exists warnings (
   id           bigint generated always as identity primary key,
